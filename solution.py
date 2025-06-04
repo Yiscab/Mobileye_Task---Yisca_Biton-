@@ -2,6 +2,7 @@ import json
 from typing import List
 from collections import Counter
 import logging
+from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO)
 class Solution:
@@ -14,7 +15,7 @@ class Solution:
         try:
             with open(self.data_file_path, 'r') as file:
                 data = file.readlines()
-            return {line.split()[0] for line in data if line.split()[0]}  # Extract protocol IDs
+            return {part.strip(',') for line in data for part in line.split() if part.startswith('0x')}  # Extract protocol IDs
         except FileNotFoundError:
             logging.error(f"Error: The file {self.data_file_path} was not found.")
             return set()
@@ -27,6 +28,8 @@ class Solution:
             if version_key not in protocol_data["protocols_by_version"]:
                 logging.error(f"Error: The version key {version_key} was not found in the protocol data.")
                 return set()
+            if protocol_data["protocols_by_version"][version_key]["id_type"] !="hex":
+                return {hex(int(pid)) for pid in protocol_data["protocols_by_version"][version_key]["protocols"]}
             return set(protocol_data["protocols_by_version"][version_key]["protocols"])
         except FileNotFoundError:
             logging.error(f"Error: The file {self.protocol_json_path} was not found.")
@@ -62,7 +65,10 @@ class Solution:
                             logging.info(f"First byte: {first_byte}")
                             version_name = chr(int(first_byte, 16))
                             logging.info(f"Version name: {version_name}")
-                            return version_name
+                            version_full_name = "".join([chr(int(byte,16)) for byte in bytes_list])
+                            logging.info(f"Version ful name: {version_full_name}")
+                            return version_full_name
+                            
                         else:
                             logging.error("Error: No bytes found after 'bytes,'.")
                 else:
@@ -78,14 +84,14 @@ class Solution:
     # Question 2: Which protocols have wrong messages frequency in the session compared to their expected frequency based on FPS?
     def q2(self) -> List[str]:
         try:
-        # Read the data file and extract the version name
+        # Read the data file 
             with open(self.data_file_path, 'r') as file:
                 data = file.readlines()
-            protocol_ids = [line.split()[0] for line in data if '0x' in line] #Extract protocol IDs from lines containing '0x'
-            
+            protocol_ids = [part.strip(',') for line in data for part in line.split() if part.startswith('0x')] #Extract protocol IDs from lines containing '0x'
+            #logging.info(f"Extracted protocol IDs: {protocol_ids}")
             # Count occurrences of each protocol ID
             actual_frequencies = Counter(protocol_ids)
-            
+            #logging.info(f"Actual frequencies: {actual_frequencies}")
             # Read the expected frequencies from protocol.json
             with open(self.protocol_json_path, 'r') as json_file:
                 protocol_data = json.load(json_file)  # Load protocol data from JSON file
@@ -116,7 +122,9 @@ class Solution:
         """
         
         actual_protocols = self._read_data_file()#Extract protocol IDs from lines containing '0x'
+        #logging.info(f"Actual protocols: {actual_protocols}")
         expected_protocols = self._read_protocol_json(version_key)  # Read expected protocols from JSON file
+        #logging.info(f"expected protocols: {expected_protocols}")
         missing_protocols = expected_protocols - actual_protocols  # Find protocols in JSON not in data file
         return list(missing_protocols)
 
@@ -149,28 +157,68 @@ class Solution:
 
     # Question 5: Which protocols have at least one message in the session with mismatch between the expected size integer and the actual message content size?
     def q5(self) -> List[str]:
-        pass
+        with open(self.data_file_path,'r') as rf:
+            data = rf.readlines()
+        mismatched_protols_size = set()
+        for line in data:
+           part = line.split()
+           try:
+                index = part.index('bytes,')
+           except ValueError:
+                logging.warning("No 'bytes,' found in the line, skipping.")
+                continue
+           expected_size = int(part[index-1])
+           actual_size = len(part[index+1:])
+           if expected_size != actual_size:
+               mismatched_protols_size.add(part[index-2].strip(','))
+        return list(mismatched_protols_size)
+
+
 
     # Question 6: Which protocols are marked as non dynamic_size in protocol.json, but appear with inconsistent expected message sizes Integer in the data file?
     def q6(self) -> List[str]:
-        pass
+        dict_diffrent_expected_size = defaultdict(set)
+        non_dynamic_diffrent_expected = set()
+        with open(self.protocol_json_path,'r') as rf:
+            protocal_data = json.load(rf)
+        protocols_non_dynamic = {key for key,value in protocal_data["protocols"].items() if value['dynamic_size']== False}
+        with open(self.data_file_path,'r') as dr:
+            data = dr.readlines()
+        for line in data:
+            part = line.split()
+            protocol_id = next((pid.strip(',') for pid in part if pid.startswith('0x')),None)
+            if not protocol_id:
+                continue
+            if protocol_id in non_dynamic_diffrent_expected:
+                continue
+            try:
+                index = part.index('bytes,')
+            except (ValueError , IndexError):
+                logging.warning("No 'bytes,' found in the line, skipping.")
+                continue
+            
+            expected_size = int(part[index-1])
+            dict_diffrent_expected_size[protocol_id].add(expected_size)
+            if protocol_id in protocols_non_dynamic:
+                if len(dict_diffrent_expected_size[protocol_id]) > 1:
+                    non_dynamic_diffrent_expected.add(protocol_id)
+        return list(non_dynamic_diffrent_expected)
 
 
 Solution = Solution("data.txt", "protocol.json")
 # Example usage
 if __name__ == "__main__":
     print("------- q1 --------")
-    print(Solution.q1())
+    version_name = Solution.q1()
+    print(version_name)
     print("------- q2 --------")
-    print(Solution.q2())
+    logging.info(f"mismatch protocols: {Solution.q2()}")
     print("------- q3 --------")
-    print(Solution.q3("Version1"))
-    print("------- q3 --------")
-    print(Solution.q3("Version2"))
+    print(Solution.q3(version_name))
     print("------- q4 --------")
-    print(Solution.q4("Version1"))
-    print("------- q4 (version2) --------")
-    print(Solution.q4("Version2"))
-    # print(Solution.q5())
-    # print(Solution.q6())
+    print(Solution.q4(version_name))
+    print("------- q5 --------")
+    print(Solution.q5())
+    print("------- q6 --------")
+    print(Solution.q6())
 
